@@ -16,25 +16,26 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "types/offer.h"
-#include "types/device.h"
 #include "types/device-manager.h"
-#include "types/registry.h"
+#include "types/device.h"
+#include "types/offer.h"
 #include "types/popup-surface.h"
+#include "types/registry.h"
 
 #include "util/files.h"
-#include "util/string.h"
 #include "util/misc.h"
+#include "util/string.h"
 
-#include <wayland-client.h>
-#include <unistd.h>
 #include <assert.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <string.h>
-#include <getopt.h>
 #include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <getopt.h>
+#include <stdio.h>
+#include <string.h>
 #include <sys/wait.h>
+#include <unistd.h>
+#include <wayland-client.h>
 #include <wayland-util.h>
 
 static struct {
@@ -44,6 +45,7 @@ static struct {
     int list_types;
     int primary;
     int watch;
+    int sensitive;
     argv_t watch_command;
     const char *seat_name;
 } options;
@@ -63,18 +65,14 @@ static struct popup_surface *popup_surface = NULL;
 static int offer_received = 0;
 
 static struct types classify_offer_types(struct offer *offer) {
-    struct types types = { 0 };
+    struct types types = {0};
     offer_for_each_mime_type(offer, mime_type) {
-        if (
-            options.explicit_type != NULL &&
-            strcmp(mime_type, options.explicit_type) == 0
-        ) {
+        if (options.explicit_type != NULL &&
+            strcmp(mime_type, options.explicit_type) == 0) {
             types.explicit_available = 1;
         }
-        if (
-            options.inferred_type != NULL &&
-            strcmp(mime_type, options.inferred_type) == 0
-        ) {
+        if (options.inferred_type != NULL &&
+            strcmp(mime_type, options.inferred_type) == 0) {
             types.inferred_available = 1;
         }
         if (strcmp(mime_type, text_plain_utf8) == 0) {
@@ -83,52 +81,47 @@ static struct types classify_offer_types(struct offer *offer) {
         if (strcmp(mime_type, text_plain) == 0) {
             types.plain_text_available = 1;
         }
-        if (
-            types.any_text == NULL &&
-            mime_type_is_text(mime_type)
-        ) {
+        if (types.any_text == NULL && mime_type_is_text(mime_type)) {
             types.any_text = mime_type;
         }
         if (types.any == NULL) {
             types.any = mime_type;
         }
-        if (
-            options.explicit_type != NULL &&
+        if (options.explicit_type != NULL &&
             types.having_explicit_as_prefix == NULL &&
-            str_has_prefix(mime_type, options.explicit_type)
-        ) {
+            str_has_prefix(mime_type, options.explicit_type)) {
             types.having_explicit_as_prefix = mime_type;
         }
     }
     return types;
 }
 
-#define try_explicit \
-if (types.explicit_available) \
+#define try_explicit                                                           \
+    if (types.explicit_available)                                              \
     return options.explicit_type
 
-#define try_inferred \
-if (types.inferred_available) \
+#define try_inferred                                                           \
+    if (types.inferred_available)                                              \
     return options.inferred_type
 
-#define try_text_plain_utf8 \
-if (types.plain_text_utf8_available) \
+#define try_text_plain_utf8                                                    \
+    if (types.plain_text_utf8_available)                                       \
     return text_plain_utf8
 
-#define try_text_plain \
-if (types.plain_text_available) \
+#define try_text_plain                                                         \
+    if (types.plain_text_available)                                            \
     return text_plain
 
-#define try_prefixed \
-if (types.having_explicit_as_prefix != NULL) \
+#define try_prefixed                                                           \
+    if (types.having_explicit_as_prefix != NULL)                               \
     return types.having_explicit_as_prefix
 
-#define try_any_text \
-if (types.any_text != NULL) \
+#define try_any_text                                                           \
+    if (types.any_text != NULL)                                                \
     return types.any_text
 
-#define try_any \
-if (types.any != NULL) \
+#define try_any                                                                \
+    if (types.any != NULL)                                                     \
     return types.any
 
 static const char *mime_type_to_request(struct types types) {
@@ -192,13 +185,10 @@ static int run_paste_command(int stdin_fd, const char *clipboard_state) {
             if (clipboard_state != NULL) {
                 setenv("CLIPBOARD_STATE", clipboard_state, 1);
             }
+
             execvp(options.watch_command[0], options.watch_command);
-            fprintf(
-                stderr,
-                "Failed to spawn %s: %s",
-                options.watch_command[0],
-                strerror(errno)
-            );
+            fprintf(stderr, "Failed to spawn %s: %s", options.watch_command[0],
+                    strerror(errno));
         } else {
             execlp("cat", "cat", NULL);
             perror("exec cat");
@@ -222,11 +212,7 @@ static void complain_no_suitable_type(const struct types *types) {
         fprintf(stderr, "requested type \"%s\"\n", options.explicit_type);
     } else {
         assert(options.inferred_type);
-        fprintf(
-            stderr,
-            "inferred output type \"%s\"\n",
-            options.inferred_type
-        );
+        fprintf(stderr, "inferred output type \"%s\"\n", options.inferred_type);
     }
     fprintf(stderr, "Use \"wl-paste --list-types\" to view available types.");
     if (options.explicit_type == NULL) {
@@ -319,7 +305,12 @@ static void selection_callback(struct offer *offer, int primary) {
     wl_display_flush(wl_display);
 
     close(pipefd[1]);
-    rc = run_paste_command(pipefd[0], "data");
+
+    char *clipboard_state = "data";
+    if (options.sensitive) {
+        clipboard_state = "sensitive";
+    }
+    rc = run_paste_command(pipefd[0], clipboard_state);
     if (!rc) {
         if (options.watch) {
             /* Try to cope without exiting completely */
@@ -346,28 +337,28 @@ static void selection_callback(struct offer *offer, int primary) {
 }
 
 static void print_usage(FILE *f, const char *argv0) {
-    fprintf(
-        f,
-        "Usage:\n"
-        "\t%s [options]\n"
-        "Paste content from the Wayland clipboard.\n\n"
-        "Options:\n"
-        "\t-n, --no-newline\tDo not append a newline character.\n"
-        "\t-l, --list-types\tInstead of pasting, list the offered types.\n"
-        "\t-p, --primary\t\tUse the \"primary\" clipboard.\n"
-        "\t-w, --watch command\t"
-        "Run a command each time the selection changes.\n"
-        "\t-t, --type mime/type\t"
-        "Override the inferred MIME type for the content.\n"
-        "\t-s, --seat seat-name\t"
-        "Pick the seat to work with.\n"
-        "\t-v, --version\t\tDisplay version info.\n"
-        "\t-h, --help\t\tDisplay this message.\n"
-        "Mandatory arguments to long options are mandatory"
-        " for short options too.\n\n"
-        "See wl-clipboard(1) for more details.\n",
-        argv0
-    );
+    fprintf(f,
+            "Usage:\n"
+            "\t%s [options]\n"
+            "Paste content from the Wayland clipboard.\n\n"
+            "Options:\n"
+            "\t-n, --no-newline\tDo not append a newline character.\n"
+            "\t-l, --list-types\tInstead of pasting, list the offered types.\n"
+            "\t-p, --primary\t\tUse the \"primary\" clipboard.\n"
+            "\t-w, --watch command\t"
+            "Run a command each time the selection changes.\n"
+            "\t-t, --type mime/type\t"
+            "Override the inferred MIME type for the content.\n"
+            "\t-s, --seat seat-name\t"
+            "Pick the seat to work with.\n"
+            "\t-!, --sensitive\t\t"
+            "Set CLIPBOARD_STATAE=sensitive flag.\n"
+            "\t-v, --version\t\tDisplay version info.\n"
+            "\t-h, --help\t\tDisplay this message.\n"
+            "Mandatory arguments to long options are mandatory"
+            " for short options too.\n\n"
+            "See wl-clipboard(1) for more details.\n",
+            argv0);
 }
 
 static void parse_options(int argc, argv_t argv) {
@@ -375,20 +366,19 @@ static void parse_options(int argc, argv_t argv) {
         bail("Empty argv");
     }
 
-    static struct option long_options[] = {
-        {"version", no_argument, 0, 'v'},
-        {"help", no_argument, 0, 'h'},
-        {"primary", no_argument, 0, 'p'},
-        {"no-newline", no_argument, 0, 'n'},
-        {"list-types", no_argument, 0, 'l'},
-        {"watch", required_argument, 0, 'w'},
-        {"type", required_argument, 0, 't'},
-        {"seat", required_argument, 0, 's'},
-        {0, 0, 0, 0}
-    };
+    static struct option long_options[] = {{"version", no_argument, 0, 'v'},
+                                           {"help", no_argument, 0, 'h'},
+                                           {"primary", no_argument, 0, 'p'},
+                                           {"no-newline", no_argument, 0, 'n'},
+                                           {"list-types", no_argument, 0, 'l'},
+                                           {"sensitive", no_argument, 0, '!'},
+                                           {"watch", required_argument, 0, 'w'},
+                                           {"type", required_argument, 0, 't'},
+                                           {"seat", required_argument, 0, 's'},
+                                           {0, 0, 0, 0}};
     while (1) {
         int option_index;
-        const char *opts = "vhpnlw:t:s:";
+        const char *opts = "vhpnlw:t:s:!";
         int c = getopt_long(argc, argv, opts, long_options, &option_index);
         if (c == -1) {
             break;
@@ -432,13 +422,10 @@ static void parse_options(int argc, argv_t argv) {
              * will also point to bar. We do consider that an error,
              * so detect this case and print an error message.
              */
-            options.watch_command = (argv_t) &argv[optind - 1];
+            options.watch_command = (argv_t)&argv[optind - 1];
             if (options.watch_command[0][0] == '-') {
-                fprintf(
-                    stderr,
-                    "Expected a subcommand instead of an argument"
-                    " after --watch\n"
-                );
+                fprintf(stderr, "Expected a subcommand instead of an argument"
+                                " after --watch\n");
                 print_usage(stderr, argv[0]);
                 exit(1);
             }
@@ -452,6 +439,9 @@ static void parse_options(int argc, argv_t argv) {
             break;
         case 's':
             options.seat_name = strdup(optarg);
+            break;
+        case '!':
+            options.sensitive = 1;
             break;
         default:
             /* getopt has already printed an error message */
@@ -497,8 +487,8 @@ int main(int argc, argv_t argv) {
     }
 
     /* Create the device */
-    struct device_manager *device_manager
-        = registry_find_device_manager(registry, options.primary);
+    struct device_manager *device_manager =
+        registry_find_device_manager(registry, options.primary);
     if (device_manager == NULL) {
         complain_about_selection_support(options.primary);
     }
@@ -529,7 +519,8 @@ int main(int argc, argv_t argv) {
         popup_surface_init(popup_surface);
     }
 
-    while (wl_display_dispatch(wl_display) >= 0);
+    while (wl_display_dispatch(wl_display) >= 0)
+        ;
 
     perror("wl_display_dispatch");
     return 1;
