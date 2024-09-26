@@ -306,8 +306,15 @@ static void selection_callback(struct offer *offer, int primary) {
 
     close(pipefd[1]);
 
+    int got_hint = 0;
+    offer_for_each_mime_type(offer, mime_type) {
+        if (strcmp(mime_type, "x-kde-passwordManagerHint") == 0) {
+            got_hint = 1;
+        }
+    }
+
     char *clipboard_state = "data";
-    if (options.sensitive) {
+    if (got_hint || options.sensitive) {
         clipboard_state = "sensitive";
     }
     rc = run_paste_command(pipefd[0], clipboard_state);
