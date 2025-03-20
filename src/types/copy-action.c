@@ -73,7 +73,7 @@ static void do_send(struct source *source, const char *mime_type, int fd) {
     fcntl(fd, F_SETFL, 0);
 
     if (strcmp(mime_type, "x-kde-passwordManagerHint") == 0 && self->sensitive) {
-        write(fd, "secret", 6);
+        (void)!write(fd, "secret", 6);
         close(fd);
         return;
     }
